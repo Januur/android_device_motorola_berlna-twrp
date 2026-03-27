@@ -1,57 +1,56 @@
 name: "[TWRP][berlna] Motorola Edge 2021"
-
 on:
   workflow_dispatch:
-
 env:
   TZ: Asia/Kolkata
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
        - name: "Cleanup Environment"
          uses: rokibhasansagar/slimhub_actions@main
 
        - name: Initializing environment
          run: |
-            echo "::group::Install Build Env Tool"
             sudo -E apt-get clean
             sudo -E apt-get -qq update
-            sudo -E apt-get -qq install curl libstdc++6 git wget repo rsync aria2
-            echo "::endgroup::"
+            sudo -E apt-get -qq install curl libstdc++6 git wget rsync aria2 repo
             git config --global user.name "januur"
-            git config --global user.email "fazuultree@gmail.com"   
+            git config --global user.email "fazuultree@gmail.com"
             git clone https://github.com/akhilnarang/scripts --depth=1 --single-branch
             cd scripts
-            echo "::group::Setup Build Env"
             sudo -E bash setup/android_build_env.sh
-            echo "::endgroup::"
-            echo "::group::Install Android Sdk"
-            sudo -E bash setup/install_android_sdk.sh
-            echo "::endgroup::"
-             
+
        - name: "Sync & compile"
          run: |
-            cd ~
-            mkdir twrp
-            cd twrp
-            repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp -b twrp-12.1 --depth=1 --groups=all,-notdefault,-device,-darwin,-x86,-mips
-            repo sync -j4
-            cd build
+            mkdir ~/twrp
+            cd ~/twrp
+            repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp -b twrp-12.1 --depth=1
+            repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+            cd ~/twrp/build
             git fetch https://gerrit.twrp.me/android_build refs/changes/45/5445/1 && git cherry-pick FETCH_HEAD
             cd ~/twrp
             git clone https://github.com/SyberHexen/AnyKernel3 --depth=1 -b master+twrp bootable/recovery/installer
             git clone https://github.com/SyberHexen/android_device_motorola_berlna-twrp --depth=1 -b twrp-12.1 device/motorola/berlna
-            . build/envsetup.sh && lunch twrp_berlna-eng && mka bootimage -j4
+            echo "TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
+            echo "TARGET_RECOVERY_FORCE_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
+            export ALLOW_MISSING_DEPENDENCIES=true
+            export LC_ALL=C
+            export TARGET_PREBUILT_KERNEL=device/motorola/berlna/prebuilt/Image
+            . build/envsetup.sh
+            lunch twrp_berlna-eng
+            mka bootimage -j$(nproc --all)
 
-       - uses: actions/upload-artifact@v4
+       - name: Upload boot.img
+         uses: actions/upload-artifact@v4
          with:
-          name: recoveryzip
-          path: work/out/target/product/*/*.zip
+           name: TWRP-berlna-boot
+           path: ~/twrp/out/target/product/berlna/boot.img
 
-       - uses: actions/upload-artifact@v4
+       - name: Upload dtb and dtbo
+         uses: actions/upload-artifact@v4
          with:
-          name: recoveryimage
-          path: work/out/target/product/*/*.img
+           name: TWRP-berlna-dtb
+           path: |
+             ~/twrp/device/motorola/berlna/prebuilt/dtb.img
+             ~/twrp/device/motorola/berlna/prebuilt/dtbo.img
