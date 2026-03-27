@@ -7,50 +7,78 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-       - name: "Cleanup Environment"
-         uses: rokibhasansagar/slimhub_actions@main
+      - name: Cleanup Environment
+        uses: rokibhasansagar/slimhub_actions@main
 
-       - name: Initializing environment
-         run: |
-            sudo -E apt-get clean
-            sudo -E apt-get -qq update
-            sudo -E apt-get -qq install curl libstdc++6 git wget rsync aria2 repo
-            git config --global user.name "januur"
-            git config --global user.email "fazuultree@gmail.com"
-            git clone https://github.com/akhilnarang/scripts --depth=1 --single-branch
-            cd scripts
-            sudo -E bash setup/android_build_env.sh
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 24
 
-       - name: "Sync & compile"
-         run: |
-            mkdir ~/twrp
-            cd ~/twrp
-            repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp -b twrp-12.1 --depth=1
-            repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-            cd ~/twrp/build
-            git fetch https://gerrit.twrp.me/android_build refs/changes/45/5445/1 && git cherry-pick FETCH_HEAD
-            cd ~/twrp
-            git clone https://github.com/SyberHexen/AnyKernel3 --depth=1 -b master+twrp bootable/recovery/installer
-            git clone https://github.com/SyberHexen/android_device_motorola_berlna-twrp --depth=1 -b twrp-12.1 device/motorola/berlna
-            echo "TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
-            echo "TARGET_RECOVERY_FORCE_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
-            export ALLOW_MISSING_DEPENDENCIES=true
-            export LC_ALL=C
-            export TARGET_PREBUILT_KERNEL=device/motorola/berlna/prebuilt/Image
-            . build/envsetup.sh
-            lunch twrp_berlna-eng
-            mka bootimage -j$(nproc --all)
+      - name: Initializing environment
+        run: |
+          sudo -E apt-get clean
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install curl libstdc++6 git wget rsync aria2 \
+            gperf gcc-multilib g++-multilib libc6-dev x11proto-core-dev \
+            libx11-dev lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc \
+            ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev \
+            libsdl1.2-dev libxml2 lzop pngcrush schedtool squashfs-tools \
+            imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev
+          git config --global user.name "januur"
+          git config --global user.email "fazuultree@gmail.com"
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
 
-       - name: Upload boot.img
-         uses: actions/upload-artifact@v4
-         with:
-           name: TWRP-berlna-boot
-           path: ~/twrp/out/target/product/berlna/boot.img
+      - name: Sync Sources
+        run: |
+          mkdir -p ~/twrp
+          cd ~/twrp
+          repo init \
+            -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp \
+            -b twrp-12.1 \
+            --depth=1
+          repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
-       - name: Upload dtb and dtbo
-         uses: actions/upload-artifact@v4
-         with:
-           name: TWRP-berlna-dtb
-           path: |
-             ~/twrp/device/motorola/berlna/prebuilt/dtb.img
-             ~/twrp/device/motorola/berlna/prebuilt/dtbo.img
+      - name: Clone Device Tree and AnyKernel3
+        run: |
+          cd ~/twrp
+          git clone https://github.com/SyberHexen/android_device_motorola_berlna-twrp.git \
+            --depth=1 -b twrp-12.1 \
+            device/motorola/berlna
+          git clone https://github.com/osm0sis/AnyKernel3.git \
+            --depth=1 \
+            bootable/recovery/installer
+
+      - name: Fix Display Black Screen
+        run: |
+          cd ~/twrp
+          echo "" >> device/motorola/berlna/BoardConfig.mk
+          echo "TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
+          echo "TARGET_RECOVERY_FORCE_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
+          tail -5 device/motorola/berlna/BoardConfig.mk
+
+      - name: Building TWRP
+        run: |
+          cd ~/twrp
+          source build/envsetup.sh
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          export TARGET_PREBUILT_KERNEL=device/motorola/berlna/prebuilt/Image
+          lunch twrp_berlna-eng
+          mka bootimage -j$(nproc --all)
+
+      - name: Check output
+        run: |
+          find ~/twrp/out/target/product/berlna/ -name "*.img" 2>/dev/null || echo "No img found"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TWRP-berlna
+          path: |
+            /home/runner/twrp/out/target/product/berlna/boot.img
+            /home/runner/twrp/device/motorola/berlna/prebuilt/dtb.img
+            /home/runner/twrp/device/motorola/berlna/prebuilt/dtbo.img
